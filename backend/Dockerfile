@@ -25,6 +25,9 @@ COPY --from=base /app /app
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-EXPOSE 8000
+ENV BACKEND_PORT=8000
+
+EXPOSE ${BACKEND_PORT}
+
 # Run the application.
-CMD ["fastapi", "run", "app/main.py", "--port", "8000", "--host", "0.0.0.0"]
+CMD ["fastapi", "run", "app/main.py", "--port", "$BACKEND_PORT", "--host", "0.0.0.0"]
