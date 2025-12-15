@@ -1,7 +1,10 @@
-from pydantic import BaseModel
-from devteam.config import settings
-
 from enum import StrEnum
+
+from pydantic import BaseModel, model_validator
+
+from devteam.config import settings
+from devteam.llm.llm_models import ModelProvider, validate_model
+
 
 class ApprovalMode(StrEnum):
     STRICT = "strict"
@@ -48,28 +51,46 @@ class AIAgentSettings(BaseModel):
 
 
 class AgentsSettings(BaseModel):
+    model_provider: ModelProvider
     manager: AIAgentSettings
     architect: AIAgentSettings
     developer: AIAgentSettings
     qa: AIAgentSettings
 
+    @model_validator(mode="after")
+    def validate_agents_settings(self):
+        """Validates that individual model settings for each agent are valid based on the given model family"""
+
+        if not validate_model(self.model_provider, self.manager.model):
+            raise ValueError(
+                f"Unsupported model for Manager agent: {self.manager.model}"
+            )
+        if not validate_model(self.model_provider, self.architect.model):
+            raise ValueError(
+                f"Unsupported model for Architect agent: {self.architect.model}"
+            )
+        if not validate_model(self.model_provider, self.developer.model):
+            raise ValueError(
+                f"Unsupported model for Developer agent: {self.developer.model}"
+            )
+        if not validate_model(self.model_provider, self.qa.model):
+            raise ValueError(f"Unsupported model for QA agent: {self.qa.model}")
+
+        return self
+
 
 class LLMModelSettings(BaseModel):
-    enabled: bool
     api_key: str | None = None
 
 
 class ModelSettings(BaseModel):
     anthropic: LLMModelSettings = LLMModelSettings(
-        enabled=True if settings.anthropic_api_key else False,
         api_key=settings.anthropic_api_key,
     )
     openai: LLMModelSettings = LLMModelSettings(
-        enabled=True if settings.openai_api_key else False,
         api_key=settings.openai_api_key,
     )
     gemeni: LLMModelSettings = LLMModelSettings(
-        enabled=True if settings.gemeni_api_key else False,
         api_key=settings.gemeni_api_key,
     )
 

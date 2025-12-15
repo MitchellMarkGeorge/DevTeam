@@ -50,33 +50,31 @@ audit:
 
 # Agent configuration (required)
 agents:
+  # model provider to be used for all agents -> "anthropic", "openai" or "gemini"
+  model_provider: anthropic
   manager:
     # model used by the specific agent
-    # uses a more generic name here for convinence
-    model: claude-haiku-3-5 # string
+    model: claude-haiku-4-5-20251001 # string
     
   architect:
-    model: claude-sonnet-4-5
+    model: claude-sonnet-4-5-20250929
     
   developer:
-    model: claude-sonnet-4-5
+    model: claude-sonnet-4-5-20250929
     
   qa: 
-    model: claude-sonnet-4-5
+    model: claude-sonnet-4-5-20250929
   
 # Model settings (required)
 models:
   anthropic:
-    enabled: true
     api_key: null # string or null -> if it is null, it will fallback to the appropriate enviroment variable
     # should it include other settings like temperature, max_tokens, top_p, etc.
     
   openai:
-    enabled: true
     api_key: null
     
   gemeni:
-    enabled: true
     api_key: null
   
 # Tool settings (optional)
