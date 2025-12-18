@@ -7,7 +7,8 @@ from .llm_models import (
     ModelPricing,
     validate_model,
     get_default_models_for_agents,
-    get_model_by_name_or_version,
+    get_model_by_name_or_snapshot,
+    is_reasoning_model,
     calculate_usage_cost,
     MODELS,
     ANTHROPIC_MODELS,
@@ -27,6 +28,7 @@ __all__ = [
     "OPENAI_MODELS",
     "validate_model",
     "get_default_models_for_agents",
-    "get_model_by_name_or_version",
+    "get_model_by_name_or_snapshot",
+    "is_reasoning_model",
     "calculate_usage_cost",
 ]

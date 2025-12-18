@@ -30,12 +30,12 @@ class GeminiClient(BaseLLMClient[ContentDict, ToolDict, GenerateContentResponse]
         self.client = Client(api_key=api_key).aio
         super().__init__(ModelProvider.GEMINI, model, api_key, reasoning)
 
-    async def send_message(
+    async def complete(
         self,
         messages: list[Message],
         system_message: Optional[str] = None,
         tools: Optional[list[BaseTool]] = None,  
-        max_tokens: int = 16_384,  # think about this (2 ** 14)
+        max_tokens: int = 32_768,  # think about this (2 ** 15)
         temperature: float = 0.7,
     ) -> LLMResponse:
         converted_messages = [self._convert_message(message) for message in messages]
@@ -51,6 +51,15 @@ class GeminiClient(BaseLLMClient[ContentDict, ToolDict, GenerateContentResponse]
         if system_message:
             config["system_instruction"] = system_message
 
+        # Disable thinking mode for Gemini for now
+        # if self.reasoning_enabled:
+        #     # Enable thinking mode for Gemini with half of max_tokens as budget
+        #     thinking_budget = max_tokens // 2
+        #     config["thinking_config"] = {
+        #         "thinking_budget": thinking_budget,
+        #         "include_thoughts": True
+        #     }
+
         args = {
             "model": self.model,
             "contents": converted_messages,
@@ -65,7 +74,6 @@ class GeminiClient(BaseLLMClient[ContentDict, ToolDict, GenerateContentResponse]
         return await self.client.models.generate_content(**kwargs)
 
     def _convert_message(self, message: Message) -> ContentDict:
-        # TODO: handle tool calls and other message possibilities
         match message["type"]:
             case "text":
                 role = message["role"] if message["role"] == "user" else "model"
@@ -174,7 +182,8 @@ class GeminiClient(BaseLLMClient[ContentDict, ToolDict, GenerateContentResponse]
                 text_message: TextMessage = {
                     "role": "assistant",
                     "type": "text",
-                    "text": part.text
+                    "text": part.text,
+                    "thinking_data": None
                 }
                 content_blocks.append(text_message)
             elif (
@@ -184,7 +193,6 @@ class GeminiClient(BaseLLMClient[ContentDict, ToolDict, GenerateContentResponse]
                 and part.function_call.args
                 and part.function_call.id is not None # think about this one
             ):
-                part.function_call.id
                 tool_use_message: ToolUseMessage = {
                     "type": "tool_use",
                     "role": "assistant",
@@ -193,6 +201,7 @@ class GeminiClient(BaseLLMClient[ContentDict, ToolDict, GenerateContentResponse]
                         "tool_use_id": part.function_call.id,
                         "arguments": part.function_call.args,
                     },
+                    "thinking_data": None
                 }
                 content_blocks.append(
                     tool_use_message

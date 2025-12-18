@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
-from typing import Optional, Generic, TypeVar
+from typing import Generic, Optional, TypeVar
 
-from devteam.llm.llm_models import ModelProvider, validate_model
-from devteam.llm.models import Message, LLMResponse
+from devteam.llm.llm_models import ModelProvider, is_reasoning_model, validate_model
+from devteam.llm.models import LLMResponse, Message
 from devteam.tools import BaseTool
 from devteam.utils import exponential_backoff_retry
 
@@ -10,9 +10,12 @@ TMessage = TypeVar("TMessage")
 TTool = TypeVar("TTool")
 TResponse = TypeVar("TResponse")
 
+
 class BaseLLMClient(ABC, Generic[TMessage, TTool, TResponse]):
-    def __init__(self, provider: ModelProvider, model: str, api_key: str, reasoning: bool = False):
-        (is_valid, error_message) = self._validate_model(provider, model)
+    def __init__(
+        self, provider: ModelProvider, model: str, api_key: str, reasoning: bool = False
+    ):
+        (is_valid, error_message) = self._validate_model(provider, model, reasoning)
         if not is_valid and error_message:
             raise ValueError(error_message)
         self.model = model
@@ -20,21 +23,28 @@ class BaseLLMClient(ABC, Generic[TMessage, TTool, TResponse]):
         self.reasoning_enabled = reasoning
 
     def _validate_model(
-        self, provider: ModelProvider, model: str
+        self, provider: ModelProvider, model: str, reasoning: bool
     ) -> tuple[bool, str | None]:
-        is_valid = validate_model(provider, model)
+        is_model_valid = validate_model(provider, model)
+
+        if not is_model_valid:
+            return False, f"Invalid {provider.title()} model {model}"
+
+        if self.reasoning_enabled and not is_reasoning_model(model):
+            return False, f"Model {model} does not support reasoning"
+
         return (
-            is_valid,
-            f"Invalid {provider.title()} model {model}" if not is_valid else None,
+            True,
+            None,
         )
 
     @abstractmethod
-    async def send_message(
+    async def complete(
         self,
         messages: list[Message],
         system_message: Optional[str] = None,
-        tools: Optional[list[BaseTool]]=None, # look at type definition
-        max_tokens: int = 16_384, # think about this (2 ** 14)
+        tools: Optional[list[BaseTool]] = None,  # look at type definition
+        max_tokens: int = 32_768,  # think about this (2 ** 15)
         temperature: float = 0.7,
     ) -> LLMResponse:
         # TODO: Think about this
@@ -77,7 +87,6 @@ class BaseLLMClient(ABC, Generic[TMessage, TTool, TResponse]):
     def _convert_tool[T](self, tool: BaseTool) -> TTool:
         # convert the given tool to the required format based on the provider
         pass
-
 
     @abstractmethod
     def _convert_llm_response(self, response: TResponse) -> LLMResponse:

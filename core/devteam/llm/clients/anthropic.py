@@ -2,7 +2,13 @@ from typing import Optional
 
 import anthropic
 from anthropic.types import Message as AnthropicMessage
-from anthropic.types import MessageParam, ToolParam
+from anthropic.types import (
+    MessageParam,
+    TextBlockParam,
+    ThinkingBlockParam,
+    ToolParam,
+    ToolUseBlockParam,
+)
 
 from devteam.llm.base import BaseLLMClient, Message
 from devteam.llm.llm_models import ModelProvider, calculate_usage_cost
@@ -10,6 +16,7 @@ from devteam.llm.models import (
     LLMResponse,
     StopReason,
     TextMessage,
+    ThinkingData,
     ToolUseMessage,
     Usage,
 )
@@ -21,12 +28,12 @@ class AnthropicClient(BaseLLMClient[MessageParam, ToolParam, AnthropicMessage]):
         self.client = anthropic.AsyncClient(api_key=api_key)
         super().__init__(ModelProvider.ANTHROPIC, model, api_key, reasoning)
 
-    async def send_message(
+    async def complete(
         self,
         messages: list[Message],
         system_message: Optional[str] = None,
-        tools: Optional[list[BaseTool]] = None,  # look at type definition
-        max_tokens: int = 16_384,  # think about this (2 ** 14)
+        tools: Optional[list[BaseTool]] = None,
+        max_tokens: int = 32_768,  # think about this (2 ** 15)
         temperature: float = 0.7,
     ) -> LLMResponse:
         converted_tools: list[ToolParam] | None = (
@@ -42,7 +49,7 @@ class AnthropicClient(BaseLLMClient[MessageParam, ToolParam, AnthropicMessage]):
             "temperature": temperature,
             "tool_choice": {
                 "type": "auto",
-                "disable_parallel_tool_use": True,  # think about this
+                "disable_parallel_tool_use": True,  # need to be able to approve (or reject) tool calls
             },
         }
 
@@ -51,6 +58,11 @@ class AnthropicClient(BaseLLMClient[MessageParam, ToolParam, AnthropicMessage]):
 
         if tools:
             args["tools"] = converted_tools
+
+        if self.reasoning_enabled:
+            # reserve half of the output tokens for thinking (confirm this)
+            thinking_budget = max_tokens // 2
+            args["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
 
         message = await self._call_llm_api_with_retry(**args)
         return self._convert_llm_response(message)
@@ -90,21 +102,57 @@ class AnthropicClient(BaseLLMClient[MessageParam, ToolParam, AnthropicMessage]):
     def _convert_message(self, message: Message) -> MessageParam:
         match message["type"]:
             case "text":
-                return {
-                    "role": message["role"],
-                    "content": message["text"],
-                }
-            case "tool_use":
-                return {
-                    "role": message["role"],
-                    "content": [
+                # Check if message has thinking data
+                thinking_data = message.get("thinking_data")
+                if thinking_data:
+                    # Create content array with thinking block followed by text
+                    text_content: list[TextBlockParam | ThinkingBlockParam] = [
                         {
-                            "type": "tool_use",
-                            "id": message["call"]["tool_use_id"],
-                            "name": message["call"]["tool_name"],
-                            "input": message["call"]["arguments"],
-                        }
-                    ],
+                            "type": "thinking",
+                            "thinking": thinking_data["thinking"],
+                            "signature": thinking_data["metadata"],
+                        },
+                        {
+                            "type": "text",
+                            "text": message["text"],
+                        },
+                    ]
+                    return {
+                        "role": message["role"],
+                        "content": text_content,
+                    }
+                else:
+                    # Simple text message without thinking
+                    return {
+                        "role": message["role"],
+                        "content": message["text"],
+                    }
+            case "tool_use":
+                # Check if message has thinking data
+                thinking_data = message.get("thinking_data")
+                tool_use_content: list[ThinkingBlockParam | ToolUseBlockParam] = []
+                if thinking_data:
+                    # Add thinking block first
+                    thinking_block: ThinkingBlockParam = {
+                        "type": "thinking",
+                        "thinking": thinking_data["thinking"],
+                        "signature": thinking_data["metadata"],
+                    }
+                    tool_use_content.append(thinking_block)
+
+                # Add tool use block
+                tool_use_content.append(
+                    {
+                        "type": "tool_use",
+                        "id": message["call"]["tool_use_id"],
+                        "name": message["call"]["tool_name"],
+                        "input": message["call"]["arguments"],
+                    }
+                )
+
+                return {
+                    "role": message["role"],
+                    "content": tool_use_content,
                 }
             case "tool_use_result":
                 return {
@@ -121,13 +169,27 @@ class AnthropicClient(BaseLLMClient[MessageParam, ToolParam, AnthropicMessage]):
 
     def _convert_llm_response(self, response: AnthropicMessage) -> LLMResponse:
         content_blocks: list[Message] = []
+        current_thinking: ThinkingData | None = None
+
         for block in response.content:
-            if block.type == "text":
+            if block.type == "thinking":
+                block.thinking
+                # Store thinking block to attach to next content block
+                current_thinking = {
+                    "thinking": block.thinking,
+                    "metadata": block.signature,
+                    "encrypted_content": None,
+                }
+            elif block.type == "text":
                 text_message: TextMessage = {
                     "role": "assistant",
                     "text": block.text,
                     "type": "text",
+                    "thinking_data": current_thinking,
                 }
+
+                if current_thinking:
+                    current_thinking = None
                 content_blocks.append(text_message)
             elif block.type == "tool_use":
                 tool_use_message: ToolUseMessage = {
@@ -138,7 +200,11 @@ class AnthropicClient(BaseLLMClient[MessageParam, ToolParam, AnthropicMessage]):
                         "tool_use_id": block.id,
                         "arguments": block.input,
                     },
+                    "thinking_data": current_thinking,
                 }
+
+                if current_thinking:
+                    current_thinking = None
                 content_blocks.append(tool_use_message)
 
         # Map Anthropic stop reasons to our enum

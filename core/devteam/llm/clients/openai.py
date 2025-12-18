@@ -17,6 +17,7 @@ from devteam.llm.models import (
     LLMResponse,
     Message,
     TextMessage,
+    ThinkingData,
     ToolUseMessage,
     StopReason,
     Usage,
@@ -29,18 +30,36 @@ class OpenAIClient(BaseLLMClient[ResponseInputItemParam, FunctionToolParam, Resp
         self.client = AsyncClient(api_key=api_key)
         super().__init__(ModelProvider.OPENAI, model, api_key, reasoning)
 
-    async def send_message(
+    async def complete(
         self,
         messages: list[Message],
         system_message: Optional[str] = None,
-        tools: Optional[list[BaseTool]] = None,  # look at type definition
-        max_tokens: int = 16_384,  # think about this (2 ** 14)
+        tools: Optional[list[BaseTool]] = None,
+        max_tokens: int = 32_768,  # think about this (2 ** 15)
         temperature: float = 0.7,
     ) -> LLMResponse:
-        # Implement the send_message method here
         converted_messages = []
 
         for message in messages:
+            # Check if message has thinking data
+            thinking_data = message.get("thinking_data")
+
+            if thinking_data:
+                # Add reasoning block before the message
+                reasoning_block = {
+                    "type": "reasoning",
+                    "id": thinking_data["metadata"],
+                    "encrypted_content": thinking_data["encrypted_content"],
+                    "summary": [
+                        {
+                            "type": "summary_text",
+                            "text": thinking_data["thinking"],
+                        }
+                    ],
+                }
+                converted_messages.append(reasoning_block)
+
+            # Add the actual message
             converted_messages.append(self._convert_message(message))
 
         args = {
@@ -50,7 +69,7 @@ class OpenAIClient(BaseLLMClient[ResponseInputItemParam, FunctionToolParam, Resp
             "temperature": temperature,
             # think about this
             "parallel_tool_calls": False,  # need to handle tool calls individually especially for tool calls that require user approval
-            "store": False,  # we want to manage context ourselves
+            "store": False,  # we want to manage conversation history ourselves
         }
 
         if system_message:
@@ -58,6 +77,14 @@ class OpenAIClient(BaseLLMClient[ResponseInputItemParam, FunctionToolParam, Resp
 
         if tools:
             args["tools"] = [self._convert_tool(tool) for tool in tools]
+            
+        if self.reasoning_enabled:
+            # make sure
+            args["reasoning"] = {
+                "effort": "medium",
+                "summary": "auto"
+            }
+            args["include"] = ["reasoning.encrypted_content"]
 
         response: Response = await self._call_llm_api_with_retry(**args)
         return self._convert_llm_response(response)
@@ -126,12 +153,25 @@ class OpenAIClient(BaseLLMClient[ResponseInputItemParam, FunctionToolParam, Resp
 
     def _convert_llm_response(self, response: Response) -> LLMResponse:
         content_block: list[Message] = []
+        current_thinking: ThinkingData | None = None
+
         for block in response.output:
-            if block.type == "message":
-                # should it go through the different content array options as different blocks are merge them into one?
-                # content_block.append(
-                #     LLMResponseTextContentBlock(type="text", text=)
-                # )
+            if block.type == "reasoning":
+                # Extract reasoning summary from OpenAI's reasoning block
+                if hasattr(block, "summary") and block.summary:
+                    # Take the first text
+                    summary_text = block.summary[0].text
+                    if summary_text:
+                        current_thinking = {
+                            "thinking": summary_text,
+                            "metadata": block.id,
+                            "encrypted_content": block.encrypted_content,
+                        }
+                        # Save the reasoning block id as metadata
+                        if hasattr(block, "id") and block.id:
+                            current_thinking["metadata"] = block.id
+                            
+            elif block.type == "message":
                 for content in block.content:
                     # Should I handle refusal?
                     if content.type == "output_text":
@@ -139,10 +179,12 @@ class OpenAIClient(BaseLLMClient[ResponseInputItemParam, FunctionToolParam, Resp
                             "role": "assistant",
                             "text": content.text,
                             "type": "text",
+                            "thinking_data": current_thinking
                         }
-                        content_block.append(
-                            text_message
-                        )
+                        if current_thinking:
+                            current_thinking = None
+                        content_block.append(text_message)
+                        
             elif block.type == "function_call":
                 arguments: dict[str, Any] = json.loads(block.arguments)
                 tool_use_message: ToolUseMessage = {
@@ -153,10 +195,11 @@ class OpenAIClient(BaseLLMClient[ResponseInputItemParam, FunctionToolParam, Resp
                         "tool_use_id": block.call_id,
                         "arguments": arguments,
                     },
+                    "thinking_data": current_thinking
                 }
-                content_block.append(
-                    tool_use_message
-                )
+                if current_thinking:
+                    current_thinking = None
+                content_block.append(tool_use_message)
 
         # Map OpenAI status to our enum
         # OpenAI uses "completed", "incomplete", "failed", etc.

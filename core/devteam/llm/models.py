@@ -30,10 +30,17 @@ class Usage(BaseModel):
     cost: Optional[float] = None
 
 
+class ThinkingData(TypedDict):
+    thinking: str
+    metadata: str  # Metadata for thinking: signature (Anthropic) or id (OpenAI)
+    encrypted_content: Optional[str]
+
+
 class TextMessage(TypedDict):
     role: MessageRole
     type: Literal["text"]
     text: str
+    thinking_data: Optional[ThinkingData]  # Optional thinking/reasoning content
 
 
 class ToolUseData(TypedDict):
@@ -47,6 +54,7 @@ class ToolUseMessage(TypedDict):
     role: Literal["assistant"]
     type: Literal["tool_use"]
     call: ToolUseData
+    thinking_data: Optional[ThinkingData]  # Optional thinking/reasoning content
 
 
 class ToolUseResultData(TypedDict):
