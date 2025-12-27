@@ -1,5 +1,5 @@
 import json
-from typing import Any, Optional
+from typing import Any, Optional, override
 
 from openai import AsyncClient
 from openai.types.responses import (
@@ -11,8 +11,8 @@ from openai.types.responses import (
 )
 from openai.types.responses.response_input_item_param import FunctionCallOutput
 
-from devteam.llm.base import BaseLLMClient
-from devteam.llm.llm_models import ModelProvider, calculate_usage_cost
+from devteam.llm.base import BaseLLMClient, LLMClientConfig
+from devteam.llm.llm_models import calculate_usage_cost
 from devteam.llm.models import (
     LLMResponse,
     Message,
@@ -26,9 +26,10 @@ from devteam.tools import BaseTool
 
 
 class OpenAIClient(BaseLLMClient[ResponseInputItemParam, FunctionToolParam, Response]):
-    def __init__(self, model: str, api_key: str, reasoning: bool = False):
-        self.client = AsyncClient(api_key=api_key)
-        super().__init__(ModelProvider.OPENAI, model, api_key, reasoning)
+    @override
+    def __init__(self, config: LLMClientConfig):
+        self.client = AsyncClient(api_key=config.api_key)
+        super().__init__(config)
 
     async def complete(
         self,
@@ -89,9 +90,11 @@ class OpenAIClient(BaseLLMClient[ResponseInputItemParam, FunctionToolParam, Resp
         response: Response = await self._call_llm_api_with_retry(**args)
         return self._convert_llm_response(response)
 
+    @override
     async def _call_llm_api(self, **kwargs) -> Response:
         return self.client.responses.create(**kwargs)
 
+    @override
     def _convert_tool(self, tool: BaseTool) -> FunctionToolParam:
         schema = tool.schema
 
@@ -124,6 +127,7 @@ class OpenAIClient(BaseLLMClient[ResponseInputItemParam, FunctionToolParam, Resp
             },
         }
 
+    @override
     def _convert_message(
         self, message: Message
     ) -> ResponseInputItemParam:  # not sure of correct output type here
@@ -151,6 +155,7 @@ class OpenAIClient(BaseLLMClient[ResponseInputItemParam, FunctionToolParam, Resp
                 return tool_use_result_message
 
 
+    @override
     def _convert_llm_response(self, response: Response) -> LLMResponse:
         content_block: list[Message] = []
         current_thinking: ThinkingData | None = None
@@ -159,7 +164,7 @@ class OpenAIClient(BaseLLMClient[ResponseInputItemParam, FunctionToolParam, Resp
             if block.type == "reasoning":
                 # Extract reasoning summary from OpenAI's reasoning block
                 if hasattr(block, "summary") and block.summary:
-                    # Take the first text
+                    # Take the first summary item (come back to this)
                     summary_text = block.summary[0].text
                     if summary_text:
                         current_thinking = {
@@ -172,6 +177,7 @@ class OpenAIClient(BaseLLMClient[ResponseInputItemParam, FunctionToolParam, Resp
                             current_thinking["metadata"] = block.id
                             
             elif block.type == "message":
+                # should I just merge all content blocks into one?
                 for content in block.content:
                     # Should I handle refusal?
                     if content.type == "output_text":
@@ -179,7 +185,8 @@ class OpenAIClient(BaseLLMClient[ResponseInputItemParam, FunctionToolParam, Resp
                             "role": "assistant",
                             "text": content.text,
                             "type": "text",
-                            "thinking_data": current_thinking
+                            "thinking_data": current_thinking,
+                            "agent": None,
                         }
                         if current_thinking:
                             current_thinking = None
@@ -195,7 +202,9 @@ class OpenAIClient(BaseLLMClient[ResponseInputItemParam, FunctionToolParam, Resp
                         "tool_use_id": block.call_id,
                         "arguments": arguments,
                     },
-                    "thinking_data": current_thinking
+                    "thinking_data": current_thinking,
+                    "agent": None,
+                    
                 }
                 if current_thinking:
                     current_thinking = None
@@ -233,5 +242,6 @@ class OpenAIClient(BaseLLMClient[ResponseInputItemParam, FunctionToolParam, Resp
             usage=usage,
         )
 
+    @override
     async def close(self):
         return await self.client.close()

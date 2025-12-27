@@ -84,10 +84,10 @@ def get_default_agents_settings(
     agent_models = get_default_models_for_agents(default_model_family)
 
     # Note: this might not be used if the a FSM is used
-    manager = AIAgentSettings(model=agent_models["manager"])
-    architect = AIAgentSettings(model=agent_models["architect"])
-    developer = AIAgentSettings(model=agent_models["developer"])
-    qa = AIAgentSettings(model=agent_models["qa"])
+    manager = AIAgentSettings(model=agent_models["manager"], max_turns=10)
+    architect = AIAgentSettings(model=agent_models["architect"], max_turns=15)
+    developer = AIAgentSettings(model=agent_models["developer"], max_turns=20)
+    qa = AIAgentSettings(model=agent_models["qa"], max_turns=15)
 
     return AgentsSettings(
         model_provider=default_model_family,

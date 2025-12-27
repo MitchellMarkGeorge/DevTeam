@@ -36,7 +36,7 @@ T = TypeVar("T")
 @dataclass
 class ToolResult(Generic[T]):
     success: bool
-    result: Optional[T] = None
+    data: T
     error: Optional[str] = None
     duration_ms: int = 0
 
@@ -49,7 +49,7 @@ class BaseTool(ABC):
         pass
 
     @abstractmethod
-    async def execute(self, **kwargs):
+    async def execute(self, **kwargs) -> ToolResult:
         """Execute the tool with the given arguments."""
         pass
 

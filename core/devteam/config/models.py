@@ -1,6 +1,6 @@
 from enum import StrEnum
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from devteam.config import settings
 from devteam.llm.llm_models import ModelProvider, validate_model
@@ -48,6 +48,8 @@ class AuditSettings(BaseModel):
 
 class AIAgentSettings(BaseModel):
     model: str
+    max_turns: int = Field(ge=1, lt=20)
+    
 
 
 class AgentsSettings(BaseModel):

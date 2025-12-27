@@ -55,15 +55,19 @@ agents:
   manager:
     # model used by the specific agent
     model: claude-haiku-4-5-20251001 # string
+    max_turns: 10
     
   architect:
     model: claude-sonnet-4-5-20250929
+    max_turns: 15
     
   developer:
     model: claude-sonnet-4-5-20250929
+    max_turns: 20
     
   qa: 
     model: claude-sonnet-4-5-20250929
+    max_turns: 15
   
 # Model settings (required)
 models:

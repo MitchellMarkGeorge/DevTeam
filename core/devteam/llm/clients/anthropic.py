@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, override
 
 import anthropic
 from anthropic.types import Message as AnthropicMessage
@@ -10,8 +10,8 @@ from anthropic.types import (
     ToolUseBlockParam,
 )
 
-from devteam.llm.base import BaseLLMClient, Message
-from devteam.llm.llm_models import ModelProvider, calculate_usage_cost
+from devteam.llm.base import BaseLLMClient, LLMClientConfig
+from devteam.llm.llm_models import calculate_usage_cost
 from devteam.llm.models import (
     LLMResponse,
     StopReason,
@@ -19,15 +19,19 @@ from devteam.llm.models import (
     ThinkingData,
     ToolUseMessage,
     Usage,
+    Message
 )
 from devteam.tools import BaseTool
 
 
 class AnthropicClient(BaseLLMClient[MessageParam, ToolParam, AnthropicMessage]):
-    def __init__(self, model: str, api_key: str, reasoning: bool = False):
-        self.client = anthropic.AsyncClient(api_key=api_key)
-        super().__init__(ModelProvider.ANTHROPIC, model, api_key, reasoning)
+    
+    @override
+    def __init__(self, config: LLMClientConfig):
+        self.client = anthropic.AsyncClient(api_key=config.api_key)
+        super().__init__(config)
 
+    @override
     async def complete(
         self,
         messages: list[Message],
@@ -60,16 +64,17 @@ class AnthropicClient(BaseLLMClient[MessageParam, ToolParam, AnthropicMessage]):
             args["tools"] = converted_tools
 
         if self.reasoning_enabled:
-            # reserve half of the output tokens for thinking (confirm this)
-            thinking_budget = max_tokens // 2
+            thinking_budget = 8192 # 2 ** 13
             args["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
 
         message = await self._call_llm_api_with_retry(**args)
         return self._convert_llm_response(message)
 
+    @override
     async def _call_llm_api(self, **kwargs) -> AnthropicMessage:
         return await self.client.messages.create(**kwargs)
 
+    @override
     def _convert_tool(self, tool: BaseTool) -> ToolParam:
         schema = tool.schema
         properties = {}
@@ -99,6 +104,7 @@ class AnthropicClient(BaseLLMClient[MessageParam, ToolParam, AnthropicMessage]):
             },
         }
 
+    @override
     def _convert_message(self, message: Message) -> MessageParam:
         match message["type"]:
             case "text":
@@ -167,13 +173,13 @@ class AnthropicClient(BaseLLMClient[MessageParam, ToolParam, AnthropicMessage]):
                     ],
                 }
 
+    @override
     def _convert_llm_response(self, response: AnthropicMessage) -> LLMResponse:
         content_blocks: list[Message] = []
         current_thinking: ThinkingData | None = None
 
         for block in response.content:
             if block.type == "thinking":
-                block.thinking
                 # Store thinking block to attach to next content block
                 current_thinking = {
                     "thinking": block.thinking,
@@ -186,6 +192,7 @@ class AnthropicClient(BaseLLMClient[MessageParam, ToolParam, AnthropicMessage]):
                     "text": block.text,
                     "type": "text",
                     "thinking_data": current_thinking,
+                    "agent": None,
                 }
 
                 if current_thinking:
@@ -201,6 +208,7 @@ class AnthropicClient(BaseLLMClient[MessageParam, ToolParam, AnthropicMessage]):
                         "arguments": block.input,
                     },
                     "thinking_data": current_thinking,
+                    "agent": None,
                 }
 
                 if current_thinking:
@@ -243,5 +251,6 @@ class AnthropicClient(BaseLLMClient[MessageParam, ToolParam, AnthropicMessage]):
             usage=usage,
         )
 
+    @override
     async def close(self):
         await self.client.close()

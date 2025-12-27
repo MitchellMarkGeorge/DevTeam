@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, override
 import json
 
 from google.genai import Client
@@ -12,8 +12,8 @@ from google.genai.types import (
     Type,
 )
 
-from devteam.llm.base import BaseLLMClient
-from devteam.llm.llm_models import ModelProvider, calculate_usage_cost
+from devteam.llm.base import BaseLLMClient, LLMClientConfig
+from devteam.llm.llm_models import calculate_usage_cost
 from devteam.llm.models import (
     LLMResponse,
     Message,
@@ -26,10 +26,12 @@ from devteam.tools import BaseTool, ToolParameterType
 
 
 class GeminiClient(BaseLLMClient[ContentDict, ToolDict, GenerateContentResponse]):
-    def __init__(self, model: str, api_key: str, reasoning: bool = False):
-        self.client = Client(api_key=api_key).aio
-        super().__init__(ModelProvider.GEMINI, model, api_key, reasoning)
+    @override
+    def __init__(self, config: LLMClientConfig):
+        self.client = Client(api_key=config.api_key).aio
+        super().__init__(config)
 
+    @override
     async def complete(
         self,
         messages: list[Message],
@@ -70,9 +72,11 @@ class GeminiClient(BaseLLMClient[ContentDict, ToolDict, GenerateContentResponse]
 
         return self._convert_llm_response(response)
 
+    @override
     async def _call_llm_api(self, **kwargs) -> GenerateContentResponse:
         return await self.client.models.generate_content(**kwargs)
 
+    @override
     def _convert_message(self, message: Message) -> ContentDict:
         match message["type"]:
             case "text":
@@ -112,6 +116,7 @@ class GeminiClient(BaseLLMClient[ContentDict, ToolDict, GenerateContentResponse]
                     ],
                 }
 
+    @override
     def _convert_tool(self, tool: BaseTool) -> ToolDict:
         schema = tool.schema
 
@@ -160,6 +165,7 @@ class GeminiClient(BaseLLMClient[ContentDict, ToolDict, GenerateContentResponse]
         }
         return {"function_declarations": [function_declaration]}
 
+    @override
     def _convert_llm_response(self, response: GenerateContentResponse) -> LLMResponse:
         best_candidate = response.candidates[0] if response.candidates else None
 
@@ -183,7 +189,8 @@ class GeminiClient(BaseLLMClient[ContentDict, ToolDict, GenerateContentResponse]
                     "role": "assistant",
                     "type": "text",
                     "text": part.text,
-                    "thinking_data": None
+                    "thinking_data": None,
+                    "agent": None,
                 }
                 content_blocks.append(text_message)
             elif (
@@ -201,7 +208,8 @@ class GeminiClient(BaseLLMClient[ContentDict, ToolDict, GenerateContentResponse]
                         "tool_use_id": part.function_call.id,
                         "arguments": part.function_call.args,
                     },
-                    "thinking_data": None
+                    "thinking_data": None,
+                    "agent": None,
                 }
                 content_blocks.append(
                     tool_use_message
@@ -256,5 +264,6 @@ class GeminiClient(BaseLLMClient[ContentDict, ToolDict, GenerateContentResponse]
             usage=usage,
         )
 
+    @override
     async def close(self):
         await self.client.aclose()

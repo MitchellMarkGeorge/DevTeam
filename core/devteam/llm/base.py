@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Generic, Optional, TypeVar
 
 from devteam.llm.llm_models import ModelProvider, is_reasoning_model, validate_model
@@ -11,16 +12,24 @@ TTool = TypeVar("TTool")
 TResponse = TypeVar("TResponse")
 
 
+@dataclass
+class LLMClientConfig:
+    provider: ModelProvider
+    api_key: str
+    model: str
+    reasoning_enabled: bool = False
+
+
 class BaseLLMClient(ABC, Generic[TMessage, TTool, TResponse]):
-    def __init__(
-        self, provider: ModelProvider, model: str, api_key: str, reasoning: bool = False
-    ):
-        (is_valid, error_message) = self._validate_model(provider, model, reasoning)
+    def __init__(self, config: LLMClientConfig):
+        (is_valid, error_message) = self._validate_model(
+            config.provider, config.model, config.reasoning_enabled
+        )
         if not is_valid and error_message:
             raise ValueError(error_message)
-        self.model = model
-        self.api_key = api_key
-        self.reasoning_enabled = reasoning
+        self.model = config.model
+        self.api_key = config.api_key
+        self.reasoning_enabled = config.reasoning_enabled
 
     def _validate_model(
         self, provider: ModelProvider, model: str, reasoning: bool
@@ -47,8 +56,9 @@ class BaseLLMClient(ABC, Generic[TMessage, TTool, TResponse]):
         max_tokens: int = 32_768,  # think about this (2 ** 15)
         temperature: float = 0.7,
     ) -> LLMResponse:
-        # TODO: Think about this
-        pass
+        # TODO: should the agent type be passed in for the due to the response messages
+        # technically for streaming, this won't be needed as the messages will be put together
+        raise NotImplementedError()
 
     @abstractmethod
     async def _call_llm_api(self, **kwargs) -> TResponse:
@@ -62,9 +72,10 @@ class BaseLLMClient(ABC, Generic[TMessage, TTool, TResponse]):
         Returns:
             TResponse: The raw response from the provider
         """
-        pass
+        raise NotImplementedError()
 
-    @exponential_backoff_retry(retries=5, delay=1.0)
+    # disabling this for now
+    # @exponential_backoff_retry(retries=5, delay=1.0)
     async def _call_llm_api_with_retry(self, **kwargs) -> TResponse:
         """
         Wrapper that adds exponential backoff retry logic to the API call.
@@ -81,19 +92,19 @@ class BaseLLMClient(ABC, Generic[TMessage, TTool, TResponse]):
     @abstractmethod
     def _convert_message[T](self, message: Message) -> TMessage:
         # convert the given message to the required format based on the provider
-        pass
+        raise NotImplementedError()
 
     @abstractmethod
     def _convert_tool[T](self, tool: BaseTool) -> TTool:
         # convert the given tool to the required format based on the provider
-        pass
+        raise NotImplementedError()
 
     @abstractmethod
     def _convert_llm_response(self, response: TResponse) -> LLMResponse:
         # convert the given response from the provider to a unified format
         # Shouldn't the LLMRResponse have Messages instead?
-        pass
+        raise NotImplementedError()
 
     @abstractmethod
     async def close(self):
-        pass
+        raise NotImplementedError()

@@ -3,6 +3,8 @@ from typing import Any, Literal, Optional, TypedDict, Union
 
 from pydantic import BaseModel
 
+from devteam.agents.types import AgentType
+
 MessageRole = Literal["user", "assistant"]
 
 
@@ -41,6 +43,7 @@ class TextMessage(TypedDict):
     type: Literal["text"]
     text: str
     thinking_data: Optional[ThinkingData]  # Optional thinking/reasoning content
+    agent: Optional[AgentType]
 
 
 class ToolUseData(TypedDict):
@@ -55,6 +58,7 @@ class ToolUseMessage(TypedDict):
     type: Literal["tool_use"]
     call: ToolUseData
     thinking_data: Optional[ThinkingData]  # Optional thinking/reasoning content
+    agent: Optional[AgentType]
 
 
 class ToolUseResultData(TypedDict):
@@ -68,6 +72,7 @@ class ToolUseResultMessage(TypedDict):
     role: Literal["user"]
     type: Literal["tool_use_result"]
     call_result: ToolUseResultData
+    agent: Optional[AgentType]
 
 
 Message = Union[TextMessage, ToolUseMessage, ToolUseResultMessage]
